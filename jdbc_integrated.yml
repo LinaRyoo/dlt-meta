@@ -1,15 +1,17 @@
 # Databricks Asset Bundle for JDBC-integrated DLT-META Pipeline
-# Uses workspace files (no Repos needed)
+# This uses DLT-META's native JDBC support (no separate bronze collector needed)
 
 resources:
   jobs:
     jdbc_onboard_job:
       name: "JDBC Pipeline - Onboard"
+      description: "온보딩: JDBC 메타데이터를 DLT-META에 등록"
       
       tasks:
         - task_key: onboard_bronze
+          description: "Bronze 메타데이터 등록"
           notebook_task:
-            notebook_path: ${workspace.root_path}/files/notebooks/onboard_test
+            notebook_path: ${workspace.root_path}/files/manual_onboard
             base_parameters:
               onboard_layer: "bronze"
               onboarding_file_path: "${workspace.root_path}/files/conf/onboarding_goods_option_dev.json"
@@ -19,10 +21,11 @@ resources:
           job_cluster_key: main_cluster
         
         - task_key: onboard_silver
+          description: "Silver 메타데이터 등록"
           depends_on:
             - task_key: onboard_bronze
           notebook_task:
-            notebook_path: ${workspace.root_path}/files/notebooks/onboard_test
+            notebook_path: ${workspace.root_path}/files/manual_onboard
             base_parameters:
               onboard_layer: "silver"
               onboarding_file_path: "${workspace.root_path}/files/conf/onboarding_goods_option_dev.json"
@@ -38,8 +41,37 @@ resources:
             spark_version: "15.4.x-scala2.12"
             node_type_id: "i3.xlarge"
             num_workers: 1
+            spark_conf:
+              "spark.databricks.python.defaultPythonPath": "${var.repos_path}"
       
       max_concurrent_runs: 1
+
+    jdbc_pipeline_job:
+      name: "JDBC Pipeline - Execute"
+      description: "JDBC → Bronze → Silver 통합 파이프라인 (DLT-META Native JDBC)"
+      
+      tasks:
+        # Bronze Pipeline: JDBC → Bronze Delta
+        - task_key: bronze_pipeline
+          description: "JDBC에서 Bronze Delta로 수집 (DLT-META)"
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.jdbc_bronze_pipeline.id}
+        
+        # Silver Pipeline: Bronze → Silver
+        - task_key: silver_pipeline
+          description: "Bronze에서 Silver로 변환"
+          depends_on:
+            - task_key: bronze_pipeline
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.jdbc_silver_pipeline.id}
+      
+      schedule:
+        quartz_cron_expression: "0 0 2 * * ?"
+        timezone_id: "Asia/Seoul"
+        pause_status: "PAUSED"
+      
+      max_concurrent_runs: 1
+      timeout_seconds: 7200
 
   pipelines:
     jdbc_bronze_pipeline:
@@ -47,7 +79,7 @@ resources:
       
       libraries:
         - notebook:
-            path: ${workspace.root_path}/files/notebooks/dlt_test_pipeline
+            path: ${workspace.root_path}/files/dlt_meta_pipeline
       
       configuration:
         layer: "bronze"
@@ -60,6 +92,9 @@ resources:
       clusters:
         - label: "default"
           num_workers: 2
+          spark_conf:
+            "spark.databricks.delta.optimizeWrite.enabled": "true"
+            "spark.databricks.delta.autoCompact.enabled": "true"
       
       development: true
       continuous: false
@@ -70,7 +105,7 @@ resources:
       
       libraries:
         - notebook:
-            path: ${workspace.root_path}/files/notebooks/dlt_test_pipeline
+            path: ${workspace.root_path}/files/dlt_meta_pipeline
       
       configuration:
         layer: "silver"
@@ -84,6 +119,9 @@ resources:
       clusters:
         - label: "default"
           num_workers: 2
+          spark_conf:
+            "spark.databricks.delta.optimizeWrite.enabled": "true"
+            "spark.databricks.delta.autoCompact.enabled": "true"
       
       development: true
       continuous: false
