@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""
+Generate environment-specific onboarding JSON files from templates.
+This eliminates hardcoding and enables code reusability across environments.
+
+Usage:
+    python3 generate_onboarding.py --env dev
+    python3 generate_onboarding.py --env prod --user another.user@databricks.com
+"""
+
+import json
+import argparse
+import os
+from pathlib import Path
+
+
+def process_template(template_data: list, env: str, user_email: str, bundle_name: str = "dlt_meta_lina_demo") -> list:
+    """Process template and inject environment-specific paths."""
+    
+    # Determine workspace root path based on environment
+    if env == "dev":
+        workspace_root = f"/Workspace/Users/{user_email}/.bundle/{bundle_name}/dev/files"
+    elif env == "prod":
+        workspace_root = f"/Workspace/Shared/{bundle_name}/prod/files"
+    else:
+        raise ValueError(f"Unknown environment: {env}")
+    
+    # Process each data flow in the template
+    result = []
+    for dataflow in template_data:
+        processed_dataflow = dataflow.copy()
+        
+        # Update silver_transformation_json path if it's a relative path
+        for key in list(processed_dataflow.keys()):
+            if key.startswith("silver_transformation_json_"):
+                old_value = processed_dataflow[key]
+                # If it's a relative path (filename only), prepend workspace root
+                if not old_value.startswith("/"):
+                    processed_dataflow[key] = f"{workspace_root}/conf/{old_value}"
+                # Remove old env-specific key and add current env key
+                if key != f"silver_transformation_json_{env}":
+                    del processed_dataflow[key]
+                    processed_dataflow[f"silver_transformation_json_{env}"] = f"{workspace_root}/conf/{old_value}"
+        
+        result.append(processed_dataflow)
+    
+    return result
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Generate environment-specific onboarding JSON from template"
+    )
+    parser.add_argument(
+        "--env",
+        type=str,
+        default="dev",
+        choices=["dev", "prod"],
+        help="Target environment (dev or prod)"
+    )
+    parser.add_argument(
+        "--user",
+        type=str,
+        default="lina.ryoo@databricks.com",
+        help="Databricks user email (for dev environment)"
+    )
+    parser.add_argument(
+        "--bundle-name",
+        type=str,
+        default="dlt_meta_lina_demo",
+        help="Bundle name"
+    )
+    parser.add_argument(
+        "--template",
+        type=str,
+        default=None,
+        help="Template file path (default: conf/onboarding_goods_option.template.json)"
+    )
+    parser.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Output file path (default: conf/onboarding_goods_option_{env}.json)"
+    )
+    
+    args = parser.parse_args()
+    
+    # Determine template path
+    script_dir = Path(__file__).parent
+    if args.template:
+        template_path = Path(args.template)
+    else:
+        template_path = script_dir / "conf" / "onboarding_goods_option.template.json"
+    
+    # Read template
+    if not template_path.exists():
+        print(f"❌ Error: Template file not found: {template_path}")
+        return 1
+    
+    with open(template_path, 'r', encoding='utf-8') as f:
+        template_data = json.load(f)
+    
+    # Process template
+    config = process_template(template_data, args.env, args.user, args.bundle_name)
+    
+    # Determine output path
+    if args.output:
+        output_path = Path(args.output)
+    else:
+        output_path = script_dir / "conf" / f"onboarding_goods_option_{args.env}.json"
+    
+    # Ensure directory exists
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Write configuration
+    with open(output_path, 'w', encoding='utf-8') as f:
+        json.dump(config, f, indent=4, ensure_ascii=False)
+    
+    print(f"✅ Generated onboarding file: {output_path}")
+    print(f"   Template: {template_path}")
+    print(f"   Environment: {args.env}")
+    print(f"   User: {args.user}")
+    print(f"   Bundle: {args.bundle_name}")
+    
+    return 0
+
+
+if __name__ == "__main__":
+    exit(main())
