@@ -1,0 +1,54 @@
+{
+  "pipeline_name": "sdppoc_gdevdb02_item_goods_option_bronze",
+  "active": true,
+  "description": "Item goods option pipeline from gdevdb02",
+  "stages": [
+    {
+      "stage_id": "1",
+      "source": {
+        "source_type": "rdb",
+        "connection_name": "gdevdb02",
+        "prepare_query": "SELECT SYNC_ID, OPT_NO, OPERATION_TYPE, INS_DATE, INS_OPRT INTO #historytemp FROM itemsyncdb..s_goods_option WITH (NOLOCK) WHERE INS_DATE >= '2025-06-10'; CREATE NONCLUSTERED INDEX X_historytemp_01 ON #historytemp(OPT_NO);",
+        "query": "SELECT goo.OPT_NO, goo.OPT_GD_NO, goo.INFO_TYPE, goo.DISP_TYPE, goo.OPT_NM, goo.OPT_VALUE, goo.SORT_ORDER, goo.OPT_PRICE, goo.INVENTORY_CNT, goo.VERSION_CHG_DT, goo.REG_ID, goo.REG_DT, goo.CHG_ID, goo.CHG_DT, goo.FTBL, goo.FKEY, goo.FTYPE, goo.CHANGED, goo.OPT_STAT, goo.OPT_NM_SORT_ORDER, goo.OPT_VALUE_2, goo.USE_YN, goo.REP_IMAGE_URL, goo.OPT_MASTER_SEQ, goo.SELLER_MANAGE_VALUE, goo.SKU_MATCHING_VER_NO, goo.ENG_OPT_NM, goo.ENG_OPT_VALUE, goo.ENG_OPT_VALUE_2, goo.SINGLE_OPT_SEQ, goo.STOCK_ID, ht.SYNC_ID, ht.OPT_NO AS S_OPT_NO, ht.OPERATION_TYPE, ht.INS_DATE, ht.INS_OPRT FROM #historytemp ht LEFT JOIN item..goods_option goo WITH (NOLOCK) ON ht.OPT_NO = goo.OPT_NO",
+        "partition_column": "OPT_NO",
+        "num_partitions": 10,
+        "lower_bound": 0,
+        "upper_bound": 10000000,
+        "read_options": {
+          "fetchsize": 1000
+        }
+      },
+      "target": {
+        "target_type": "delta",
+        "name": "baikald1ws.sdp_poc_bronze.item_goods_option_bronze",
+        "mode": "overwrite",
+        "cluster_by": ["OPT_GD_NO"]
+      }
+    },
+    {
+      "stage_id": "2",
+      "source": {
+        "source_type": "sparksql",
+        "query": "SELECT * FROM bronze WHERE opt_gd_no IN (SELECT filter_value FROM baikald1xs.oss_gold.gemini_dev_filter WHERE filter_type = 'product_id' AND UPPER(use_yn) = 'Y')"
+      },
+      "target": {
+        "target_type": "tempview",
+        "name": "filtered"
+      }
+    },
+    {
+      "stage_id": "3",
+      "source": {
+        "source_type": "sparksql",
+        "query": "SELECT *, current_timestamp() AS ingest_dt FROM filtered"
+      },
+      "target": {
+        "target_type": "delta",
+        "name": "baikald1ws.sdp_poc.item_goods_option",
+        "mode": "append",
+        "partition_columns": "ingest_dt",
+        "cluster_by": ["OPT_GD_NO"]
+      }
+    }
+  ]
+}
