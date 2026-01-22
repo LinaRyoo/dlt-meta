@@ -1,0 +1,90 @@
+# Databricks Asset Bundle for JDBC-integrated DLT-META Pipeline
+# Uses workspace files (no Repos needed)
+
+resources:
+  jobs:
+    jdbc_onboard_job:
+      name: "JDBC Pipeline - Onboard"
+      
+      tasks:
+        - task_key: onboard_bronze
+          notebook_task:
+            notebook_path: ${workspace.root_path}/files/notebooks/onboard_test
+            base_parameters:
+              onboard_layer: "bronze"
+              onboarding_file_path: "${workspace.root_path}/files/conf/onboarding_goods_option_dev.json"
+              database: "${var.uc_catalog_name}.${var.bronze_schema}"
+              bronze_dataflowspec_table: "bronze_dataflowspec"
+              bronze_dataflowspec_path: "/Volumes/${var.uc_catalog_name}/${var.bronze_schema}/dlt_meta_dataflowspecs"
+          job_cluster_key: main_cluster
+        
+        - task_key: onboard_silver
+          depends_on:
+            - task_key: onboard_bronze
+          notebook_task:
+            notebook_path: ${workspace.root_path}/files/notebooks/onboard_test
+            base_parameters:
+              onboard_layer: "silver"
+              onboarding_file_path: "${workspace.root_path}/files/conf/onboarding_goods_option_dev.json"
+              database: "${var.uc_catalog_name}.${var.silver_schema}"
+              silver_dataflowspec_table: "silver_dataflowspec"
+              silver_dataflowspec_path: "/Volumes/${var.uc_catalog_name}/${var.silver_schema}/dlt_meta_dataflowspecs"
+              bronze_dataflowspec_table: "${var.uc_catalog_name}.${var.bronze_schema}.bronze_dataflowspec"
+          job_cluster_key: main_cluster
+      
+      job_clusters:
+        - job_cluster_key: main_cluster
+          new_cluster:
+            spark_version: "15.4.x-scala2.12"
+            node_type_id: "i3.xlarge"
+            num_workers: 1
+      
+      max_concurrent_runs: 1
+
+  pipelines:
+    jdbc_bronze_pipeline:
+      name: "JDBC Bronze Pipeline"
+      
+      libraries:
+        - notebook:
+            path: ${workspace.root_path}/files/notebooks/dlt_test_pipeline
+      
+      configuration:
+        layer: "bronze"
+        bronze.group: "sdppoc_item"
+        bronze.dataflowspecTable: "${var.uc_catalog_name}.${var.bronze_schema}.bronze_dataflowspec"
+        bronze.appendFlows: "False"
+      
+      target: "${var.uc_catalog_name}.${var.bronze_schema}"
+      
+      clusters:
+        - label: "default"
+          num_workers: 2
+      
+      development: true
+      continuous: false
+      channel: "CURRENT"
+    
+    jdbc_silver_pipeline:
+      name: "JDBC Silver Pipeline"
+      
+      libraries:
+        - notebook:
+            path: ${workspace.root_path}/files/notebooks/dlt_test_pipeline
+      
+      configuration:
+        layer: "silver"
+        silver.group: "sdppoc_item"
+        bronze.dataflowspecTable: "${var.uc_catalog_name}.${var.bronze_schema}.bronze_dataflowspec"
+        silver.dataflowspecTable: "${var.uc_catalog_name}.${var.silver_schema}.silver_dataflowspec"
+        silver.appendFlows: "True"
+      
+      target: "${var.uc_catalog_name}.${var.silver_schema}"
+      
+      clusters:
+        - label: "default"
+          num_workers: 2
+      
+      development: true
+      continuous: false
+      channel: "CURRENT"
